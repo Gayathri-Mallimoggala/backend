@@ -92,7 +92,9 @@ app.post("/register", async (req, res) => {
 
     res.json({ message: "User registered successfully" });
   } catch (error) {
-    res.status(500).json({ message: "Registration failed", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Registration failed", error: error.message });
   }
 });
 
@@ -121,7 +123,9 @@ app.post("/register", async (req, res) => {
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
   try {
-    const [rows] = await pool.execute("SELECT * FROM users WHERE email = ?", [email]);
+    const [rows] = await pool.execute("SELECT * FROM users WHERE email = ?", [
+      email,
+    ]);
     if (rows.length && (await bcrypt.compare(password, rows[0].password))) {
       const token = jwt.sign({ id: rows[0].id }, SECRET_KEY);
       res.json({ token });
@@ -169,7 +173,9 @@ app.post("/customers", async (req, res) => {
     );
     res.json({ message: "Customer added successfully" });
   } catch (error) {
-    res.status(500).json({ message: "Failed to add customer", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to add customer", error: error.message });
   }
 });
 
@@ -187,7 +193,9 @@ app.get("/customers", async (req, res) => {
     const [customers] = await pool.execute("SELECT * FROM customers");
     res.json(customers);
   } catch (error) {
-    res.status(500).json({ message: "Error fetching customers", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching customers", error: error.message });
   }
 });
 
@@ -220,7 +228,9 @@ app.post("/payments", async (req, res) => {
     );
     res.json({ message: "Payment processed successfully" });
   } catch (error) {
-    res.status(500).json({ message: "Payment processing failed", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Payment processing failed", error: error.message });
   }
 });
 
@@ -240,7 +250,9 @@ app.get("/notifications", async (req, res) => {
     );
     res.json(notifications);
   } catch (error) {
-    res.status(500).json({ message: "Failed to fetch notifications", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to fetch notifications", error: error.message });
   }
 });
 
