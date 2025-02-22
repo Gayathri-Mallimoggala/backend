@@ -16,6 +16,11 @@ app.use(cors());
 const PORT = process.env.PORT || 5000;
 const SECRET_KEY = process.env.SECRET_KEY;
 
+const multer = require("multer");
+const xlsx = require("xlsx");
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -128,7 +133,6 @@ app.delete("/customers/:id", async (req, res) => {
   }
 });
 
-
 app.put("/customers/:id", async (req, res) => {
   const { id } = req.params;
   const { name } = req.body;
@@ -208,5 +212,48 @@ const checkOverduePayments = async () => {
   }
 };
 setInterval(checkOverduePayments, 3600000);
+
+app.post("/upload-customers", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+    const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      for (const row of data) {
+        const {
+          Name,
+          Contact,
+          "Outstanding Amount": outstandingAmount,
+          "Due Date": dueDate,
+          "Payment Status": paymentStatus,
+        } = row;
+
+        await connection.execute(
+          "INSERT INTO customers (name, contact, outstandingAmount, dueDate, paymentStatus) VALUES (?, ?, ?, ?, ?)",
+          [Name, Contact, outstandingAmount, dueDate, paymentStatus]
+        );
+      }
+
+      await connection.commit();
+      res.json({ message: "Customers uploaded successfully" });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error("File Upload Error:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to process file", error: error.message });
+  }
+});
 
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
