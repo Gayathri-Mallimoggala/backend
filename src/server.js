@@ -6,6 +6,8 @@ const WebSocket = require("ws");
 const mysql = require("mysql2/promise");
 const dotenv = require("dotenv");
 const http = require("http");
+const swaggerJsdoc = require("swagger-jsdoc");
+const swaggerUi = require("swagger-ui-express");
 
 dotenv.config();
 
@@ -34,23 +36,51 @@ const pool = mysql.createPool({
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const sendNotification = async (message) => {
-  try {
-    await pool.execute(
-      "INSERT INTO notifications (type, message, createdAt) VALUES (?, ?, NOW())",
-      [message.type, message.message]
-    );
-
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(message));
-      }
-    });
-  } catch (error) {
-    console.error("Notification Error:", error);
-  }
+const swaggerOptions = {
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "Customer Management API",
+      version: "1.0.0",
+      description: "API for managing customers, payments, and notifications",
+    },
+    servers: [
+      {
+        url: "http://localhost:5000",
+        description: "Local development server",
+      },
+    ],
+  },
+  apis: ["./src/server.js"],
 };
 
+const swaggerDocs = swaggerJsdoc(swaggerOptions);
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+
+console.log("Swagger API docs available at http://localhost:5000/api-docs");
+
+/**
+ * @swagger
+ * /register:
+ *   post:
+ *     summary: Register a new user
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: User registered successfully
+ */
 app.post("/register", async (req, res) => {
   const { name, email, password } = req.body;
   try {
@@ -62,32 +92,74 @@ app.post("/register", async (req, res) => {
 
     res.json({ message: "User registered successfully" });
   } catch (error) {
-    console.error("Registration Error:", error);
-    res
-      .status(500)
-      .json({ message: "Registration failed", error: error.message });
+    res.status(500).json({ message: "Registration failed", error: error.message });
   }
 });
 
+/**
+ * @swagger
+ * /login:
+ *   post:
+ *     summary: User login
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Returns JWT token
+ *       401:
+ *         description: Invalid credentials
+ */
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
   try {
-    const [rows] = await pool.execute("SELECT * FROM users WHERE email = ?", [
-      email,
-    ]);
+    const [rows] = await pool.execute("SELECT * FROM users WHERE email = ?", [email]);
     if (rows.length && (await bcrypt.compare(password, rows[0].password))) {
       const token = jwt.sign({ id: rows[0].id }, SECRET_KEY);
-
       res.json({ token });
     } else {
       res.status(401).json({ message: "Invalid credentials" });
     }
   } catch (error) {
-    console.error("Login Error:", error);
     res.status(500).json({ message: "Login failed", error: error.message });
   }
 });
 
+/**
+ * @swagger
+ * /customers:
+ *   post:
+ *     summary: Add a new customer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               contact:
+ *                 type: string
+ *               outstandingAmount:
+ *                 type: number
+ *               dueDate:
+ *                 type: string
+ *                 format: date
+ *               paymentStatus:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Customer added successfully
+ */
 app.post("/customers", async (req, res) => {
   const { name, contact, outstandingAmount, dueDate, paymentStatus } = req.body;
   try {
@@ -95,92 +167,72 @@ app.post("/customers", async (req, res) => {
       "INSERT INTO customers (name, contact, outstandingAmount, dueDate, paymentStatus) VALUES (?, ?, ?, ?, ?)",
       [name, contact, outstandingAmount, dueDate, paymentStatus]
     );
-
-    await sendNotification({
-      type: "customer_added",
-      message: `New customer ${name} added successfully`,
-    });
-
     res.json({ message: "Customer added successfully" });
   } catch (error) {
-    console.error("Customer Add Error:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to add customer", error: error.message });
+    res.status(500).json({ message: "Failed to add customer", error: error.message });
   }
 });
 
+/**
+ * @swagger
+ * /customers:
+ *   get:
+ *     summary: Get all customers
+ *     responses:
+ *       200:
+ *         description: Returns a list of customers
+ */
 app.get("/customers", async (req, res) => {
   try {
     const [customers] = await pool.execute("SELECT * FROM customers");
     res.json(customers);
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching customers", error: error.message });
+    res.status(500).json({ message: "Error fetching customers", error: error.message });
   }
 });
 
-app.delete("/customers/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    await pool.execute("DELETE FROM customers WHERE id = ?", [id]);
-    res.json({ message: "Customer deleted successfully" });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error deleting customer", error: error.message });
-  }
-});
-
-app.put("/customers/:id", async (req, res) => {
-  const { id } = req.params;
-  const { name } = req.body;
-
-  if (!name) {
-    return res.status(400).json({ message: "Name is required" });
-  }
-
-  try {
-    await pool.execute("UPDATE customers SET name = ? WHERE id = ?", [
-      name,
-      id,
-    ]);
-    res.json({ message: "Customer name updated successfully" });
-  } catch (error) {
-    console.error("Error updating customer:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
+/**
+ * @swagger
+ * /payments:
+ *   post:
+ *     summary: Process a payment for a customer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               customerId:
+ *                 type: integer
+ *               amount:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Payment processed successfully
+ */
 app.post("/payments", async (req, res) => {
   const { customerId, amount } = req.body;
-
   try {
     await pool.execute(
       "INSERT INTO payments (customerId, amount, paymentDate) VALUES (?, ?, NOW())",
       [customerId, amount]
     );
-
-    await pool.execute("UPDATE customers SET paymentStatus = ? WHERE id = ?", [
-      "Completed",
-      customerId,
-    ]);
-
-    await sendNotification({
-      type: "payment_received",
-      message: `Payment of $${amount} received for Customer ID ${customerId}`,
-    });
-
     res.json({ message: "Payment processed successfully" });
   } catch (error) {
-    console.error("Payment Error:", error);
-    res
-      .status(500)
-      .json({ message: "Payment processing failed", error: error.message });
+    res.status(500).json({ message: "Payment processing failed", error: error.message });
   }
 });
 
+/**
+ * @swagger
+ * /notifications:
+ *   get:
+ *     summary: Get all notifications
+ *     responses:
+ *       200:
+ *         description: Returns a list of notifications
+ */
 app.get("/notifications", async (req, res) => {
   try {
     const [notifications] = await pool.execute(
@@ -188,10 +240,7 @@ app.get("/notifications", async (req, res) => {
     );
     res.json(notifications);
   } catch (error) {
-    console.error("Notification Fetch Error:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to fetch notifications", error: error.message });
+    res.status(500).json({ message: "Failed to fetch notifications", error: error.message });
   }
 });
 
@@ -213,6 +262,26 @@ const checkOverduePayments = async () => {
 };
 setInterval(checkOverduePayments, 3600000);
 
+/**
+ * @swagger
+ * /upload-customers:
+ *   post:
+ *     summary: Upload customers from an Excel file
+ *     description: Accepts an Excel file (.xlsx) containing customer details and inserts them into the database.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Customers uploaded successfully
+ */
 app.post("/upload-customers", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
