@@ -18,7 +18,9 @@ The **Customer Management API** is a backend system designed to manage customer 
 
 ### **Clone the Repository**
 git clone https://github.com/Gayathri-Mallimoggala/backend
+
 cd backend
+
 npm install
 
 Configure Environment Variables
@@ -35,7 +37,6 @@ Run Database Migrations
 node src/migrations/setupDatabase.js
 
 npm start
-
 
 The API will be available at:
 📌 http://localhost:5000
